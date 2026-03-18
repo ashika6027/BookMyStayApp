@@ -1,7 +1,7 @@
+import java.io.*;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.Scanner;
 
 // Custom Exception for Booking Errors
 class InvalidBookingException extends Exception {
@@ -10,109 +10,142 @@ class InvalidBookingException extends Exception {
     }
 }
 
-// Booking Request class
-class BookingRequest {
-    String bookingID;
-    String roomType;
-    int roomsRequested;
+// Serializable class to hold system state
+class SystemState implements Serializable {
+    private static final long serialVersionUID = 1L;
+    Map<String, Integer> roomInventory;
+    Map<String, String> bookingHistory;
 
-    public BookingRequest(String bookingID, String roomType, int roomsRequested) {
-        this.bookingID = bookingID;
-        this.roomType = roomType;
-        this.roomsRequested = roomsRequested;
-    }
-}
-
-// Thread-safe Booking Processor
-class BookingProcessor implements Runnable {
-
-    private final BlockingQueue<BookingRequest> queue;
-    private final BookMyStay hotel;
-
-    public BookingProcessor(BlockingQueue<BookingRequest> queue, BookMyStay hotel) {
-        this.queue = queue;
-        this.hotel = hotel;
-    }
-
-    @Override
-    public void run() {
-        while (!queue.isEmpty()) {
-            try {
-                BookingRequest request = queue.take(); // retrieve request
-                hotel.bookRoom(request.bookingID, request.roomType, request.roomsRequested);
-            } catch (InvalidBookingException e) {
-                System.out.println("Booking Failed: " + e.getMessage());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
+    public SystemState(Map<String, Integer> inventory, Map<String, String> history) {
+        this.roomInventory = inventory;
+        this.bookingHistory = history;
     }
 }
 
 public class BookMyStay {
 
-    // Shared room inventory
-    private final Map<String, Integer> roomInventory = new HashMap<>();
-    private final Map<String, String> bookingHistory = new HashMap<>();
+    private static final String DATA_FILE = "bookmystay_state.ser";
+
+    private Map<String, Integer> roomInventory = new HashMap<>();
+    private Map<String, String> bookingHistory = new HashMap<>();
 
     public BookMyStay() {
+        // Initialize inventory if no saved state
         roomInventory.put("STANDARD", 5);
         roomInventory.put("DELUXE", 3);
         roomInventory.put("SUITE", 2);
     }
 
     // Thread-safe booking
-    public void bookRoom(String bookingID, String roomType, int roomsRequested) throws InvalidBookingException {
-        synchronized (this) { // critical section
-            if (!roomInventory.containsKey(roomType)) {
-                throw new InvalidBookingException("Invalid room type: " + roomType);
-            }
-            int available = roomInventory.get(roomType);
-            if (roomsRequested <= 0) {
-                throw new InvalidBookingException("Number of rooms must be > 0");
-            }
-            if (roomsRequested > available) {
-                throw new InvalidBookingException(
-                        "Not enough rooms available for " + roomType + ". Available: " + available);
-            }
+    public synchronized void bookRoom(String bookingID, String roomType, int roomsRequested)
+            throws InvalidBookingException {
 
-            // Update inventory
-            roomInventory.put(roomType, available - roomsRequested);
-            bookingHistory.put(bookingID, roomType);
+        if (!roomInventory.containsKey(roomType)) {
+            throw new InvalidBookingException("Invalid room type: " + roomType);
+        }
 
-            System.out.println("Booking Successful! ID: " + bookingID + ", Room: " + roomType +
-                    ", Remaining: " + roomInventory.get(roomType));
+        int available = roomInventory.get(roomType);
+        if (roomsRequested <= 0) {
+            throw new InvalidBookingException("Number of rooms must be > 0");
+        }
+        if (roomsRequested > available) {
+            throw new InvalidBookingException(
+                    "Not enough rooms available for " + roomType + ". Available: " + available);
+        }
+
+        roomInventory.put(roomType, available - roomsRequested);
+        bookingHistory.put(bookingID, roomType);
+
+        System.out.println("Booking Successful! ID: " + bookingID + ", Room: " + roomType +
+                ", Remaining: " + roomInventory.get(roomType));
+    }
+
+    // Save system state to file
+    public synchronized void saveState() {
+        SystemState state = new SystemState(roomInventory, bookingHistory);
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream(DATA_FILE))) {
+            oos.writeObject(state);
+            System.out.println("System state saved successfully.");
+        } catch (IOException e) {
+            System.out.println("Error saving state: " + e.getMessage());
         }
     }
 
-    // Main method to simulate concurrent bookings
-    public static void main(String[] args) throws InterruptedException {
+    // Load system state from file
+    public synchronized void loadState() {
+        File file = new File(DATA_FILE);
+        if (!file.exists()) {
+            System.out.println("No previous state found. Starting with default inventory.");
+            return;
+        }
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
+            SystemState state = (SystemState) ois.readObject();
+            this.roomInventory = state.roomInventory;
+            this.bookingHistory = state.bookingHistory;
+            System.out.println("System state restored successfully.");
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("Error loading state. Starting with default inventory. " + e.getMessage());
+        }
+    }
 
+    // Display current state
+    public void displayState() {
+        System.out.println("Current Room Inventory: " + roomInventory);
+        System.out.println("Booking History: " + bookingHistory);
+    }
+
+    public static void main(String[] args) {
+        Scanner scanner = new Scanner(System.in);
         BookMyStay hotel = new BookMyStay();
-        BlockingQueue<BookingRequest> queue = new LinkedBlockingQueue<>();
 
-        // Simulate multiple guests submitting booking requests concurrently
-        queue.add(new BookingRequest("B001", "STANDARD", 2));
-        queue.add(new BookingRequest("B002", "DELUXE", 1));
-        queue.add(new BookingRequest("B003", "SUITE", 1));
-        queue.add(new BookingRequest("B004", "STANDARD", 3));
-        queue.add(new BookingRequest("B005", "DELUXE", 2)); // this may fail if insufficient
+        // Load state at startup
+        hotel.loadState();
 
-        // Create multiple threads to process bookings
-        Thread t1 = new Thread(new BookingProcessor(queue, hotel));
-        Thread t2 = new Thread(new BookingProcessor(queue, hotel));
-        Thread t3 = new Thread(new BookingProcessor(queue, hotel));
+        boolean running = true;
+        while (running) {
+            System.out.println("\n=== Book My Stay ===");
+            System.out.println("1. Book Room");
+            System.out.println("2. View State");
+            System.out.println("3. Save & Exit");
+            System.out.print("Choose an option: ");
 
-        t1.start();
-        t2.start();
-        t3.start();
+            String input = scanner.nextLine();
 
-        // Wait for threads to finish
-        t1.join();
-        t2.join();
-        t3.join();
+            switch (input) {
+                case "1":
+                    try {
+                        System.out.print("Enter Booking ID: ");
+                        String bookingID = scanner.nextLine();
 
-        System.out.println("Final Room Inventory: " + hotel.roomInventory);
-        System.out.println("All bookings processed safely under concurrency.");
+                        System.out.print("Enter Room Type (STANDARD / DELUXE / SUITE): ");
+                        String roomType = scanner.nextLine().toUpperCase();
+
+                        System.out.print("Enter Number of Rooms: ");
+                        int rooms = Integer.parseInt(scanner.nextLine());
+
+                        hotel.bookRoom(bookingID, roomType, rooms);
+                    } catch (InvalidBookingException e) {
+                        System.out.println("Booking Failed: " + e.getMessage());
+                    } catch (NumberFormatException e) {
+                        System.out.println("Invalid number input.");
+                    }
+                    break;
+
+                case "2":
+                    hotel.displayState();
+                    break;
+
+                case "3":
+                    hotel.saveState();
+                    running = false;
+                    System.out.println("Exiting system.");
+                    break;
+
+                default:
+                    System.out.println("Invalid option. Try again.");
+            }
+        }
+
+        scanner.close();
     }
 }
