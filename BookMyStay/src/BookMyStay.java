@@ -1,141 +1,91 @@
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Scanner;
 
-/**
- * Reservation represents a confirmed booking.
- *
- * @version 8.0
- */
-class Reservation {
-
-    private String reservationId;
-    private String guestName;
-    private String roomType;
-
-    public Reservation(String reservationId, String guestName, String roomType) {
-        this.reservationId = reservationId;
-        this.guestName = guestName;
-        this.roomType = roomType;
-    }
-
-    public String getReservationId() {
-        return reservationId;
-    }
-
-    public String getGuestName() {
-        return guestName;
-    }
-
-    public String getRoomType() {
-        return roomType;
-    }
-
-    public void displayReservation() {
-        System.out.println("Reservation ID : " + reservationId);
-        System.out.println("Guest Name     : " + guestName);
-        System.out.println("Room Type      : " + roomType);
-        System.out.println("-----------------------------");
+// Custom Exception for Invalid Booking
+class InvalidBookingException extends Exception {
+    public InvalidBookingException(String message) {
+        super(message);
     }
 }
 
+public class BookMyStay {
 
-/**
- * BookingHistory stores confirmed reservations.
- *
- * @version 8.0
- */
-class BookingHistory {
+    // Room inventory
+    private static Map<String, Integer> roomInventory = new HashMap<>();
 
-    private List<Reservation> reservations;
-
-    public BookingHistory() {
-        reservations = new ArrayList<>();
+    // Initialize room availability
+    static {
+        roomInventory.put("STANDARD", 5);
+        roomInventory.put("DELUXE", 3);
+        roomInventory.put("SUITE", 2);
     }
 
-    // Add confirmed reservation
-    public void addReservation(Reservation reservation) {
-        reservations.add(reservation);
-    }
+    // Method to validate booking
+    public static void validateBooking(String roomType, int roomsRequested) throws InvalidBookingException {
 
-    // Retrieve reservation list
-    public List<Reservation> getReservations() {
-        return reservations;
-    }
-}
+        // Validate room type
+        if (!roomInventory.containsKey(roomType)) {
+            throw new InvalidBookingException("Invalid Room Type: " + roomType);
+        }
 
+        // Validate number of rooms
+        if (roomsRequested <= 0) {
+            throw new InvalidBookingException("Number of rooms must be greater than 0.");
+        }
 
-/**
- * BookingReportService generates reports
- * using stored booking history.
- *
- * @version 8.0
- */
-class BookingReportService {
+        int availableRooms = roomInventory.get(roomType);
 
-    public void displayAllBookings(List<Reservation> reservations) {
-
-        System.out.println("\n===== Booking History =====");
-
-        for (Reservation r : reservations) {
-            r.displayReservation();
+        // Prevent negative inventory
+        if (roomsRequested > availableRooms) {
+            throw new InvalidBookingException("Not enough rooms available. Available: " + availableRooms);
         }
     }
 
-    public void generateSummaryReport(List<Reservation> reservations) {
+    // Booking method
+    public static void bookRoom(String roomType, int roomsRequested) throws InvalidBookingException {
 
-        Map<String, Integer> roomTypeCount = new HashMap<>();
+        // Fail-fast validation
+        validateBooking(roomType, roomsRequested);
 
-        for (Reservation r : reservations) {
+        int remaining = roomInventory.get(roomType) - roomsRequested;
 
-            String roomType = r.getRoomType();
-
-            roomTypeCount.put(
-                    roomType,
-                    roomTypeCount.getOrDefault(roomType, 0) + 1
-            );
+        // Guarding system state
+        if (remaining < 0) {
+            throw new InvalidBookingException("Booking would cause negative inventory.");
         }
 
-        System.out.println("\n===== Booking Summary Report =====");
+        roomInventory.put(roomType, remaining);
 
-        for (Map.Entry<String, Integer> entry : roomTypeCount.entrySet()) {
-
-            System.out.println(entry.getKey() + " Bookings : " + entry.getValue());
-        }
+        System.out.println("Booking Successful!");
+        System.out.println("Remaining " + roomType + " rooms: " + remaining);
     }
-}
-
-
-/**
- * UseCase8BookingHistoryReport
- * Demonstrates booking history tracking
- * and reporting functionality.
- *
- * @version 8.1
- */
-public class UseCase8BookingHistoryReport {
 
     public static void main(String[] args) {
 
-        System.out.println("=======================================");
-        System.out.println(" Book My Stay - Booking History Report ");
-        System.out.println(" Version 8.1");
-        System.out.println("=======================================");
+        Scanner scanner = new Scanner(System.in);
 
-        BookingHistory history = new BookingHistory();
+        try {
+            System.out.println("=== Book My Stay ===");
 
-        // Simulated confirmed reservations
-        history.addReservation(new Reservation("RES101", "Alice", "Single Room"));
-        history.addReservation(new Reservation("RES102", "Bob", "Double Room"));
-        history.addReservation(new Reservation("RES103", "Charlie", "Suite Room"));
-        history.addReservation(new Reservation("RES104", "David", "Single Room"));
+            System.out.print("Enter Room Type (STANDARD / DELUXE / SUITE): ");
+            String roomType = scanner.nextLine().toUpperCase();
 
-        BookingReportService reportService = new BookingReportService();
+            System.out.print("Enter Number of Rooms: ");
+            int rooms = scanner.nextInt();
 
-        // Admin views booking history
-        reportService.displayAllBookings(history.getReservations());
+            // Process booking
+            bookRoom(roomType, rooms);
 
-        // Admin generates summary report
-        reportService.generateSummaryReport(history.getReservations());
+        } catch (InvalidBookingException e) {
+            // Graceful error handling
+            System.out.println("Booking Failed: " + e.getMessage());
+        } catch (Exception e) {
+            System.out.println("Invalid input. Please enter correct values.");
+        }
 
-        System.out.println("\nReport generation completed.");
+        System.out.println("System is still running safely.");
+
+        scanner.close();
     }
 }
